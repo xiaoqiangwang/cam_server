@@ -2,7 +2,7 @@ import logging
 import unittest
 import numpy
 from scipy import signal
-
+logging.getLogger().setLevel(logging.INFO)
 from cam_server.pipeline.data_processing.functions import gauss_fit, calculate_slices, linear_fit, find_index
 
 
@@ -112,10 +112,16 @@ class FunctionsTest(unittest.TestCase):
 
         # Reverse axis
         axis = axis[::-1]
+        self.assertEqual(find_index(axis, 200), 99)
+        self.assertEqual(find_index(axis, 200.5), 99)
+        self.assertEqual(find_index(axis, 199.9), 100)
         self.assertEqual(find_index(axis, 200.9), 99)
-        self.assertEqual(find_index(axis, 0), 299)
-        self.assertEqual(find_index(axis, -1), 299)
-        self.assertEqual(find_index(axis, 300), 0)
+
+        self.assertEqual(find_index(axis, size), 0)  # needs to be last index
+        self.assertEqual(find_index(axis, size + 10), 0)  # needs to be last index
+
+        self.assertEqual(find_index(axis, 0.1), size - 1)
+        self.assertEqual(find_index(axis, -1), size - 1)
 
     def test_get_slice_data(self):
         pass
