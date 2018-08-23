@@ -103,13 +103,13 @@ def find_index(axis, item):
         # Negate the array and number to search from the right.
         return numpy.searchsorted(-axis, -item)
 
-
 def get_good_region_profile(profile, threshold=0.3, gfscale=1.8):
     profile_min = profile.min()
-    threshold_value = (profile.max() - profile_min) * threshold + profile_min
-
     # The center of the good region is defined by the index of the max value of the profile
     index_maximum = profile.argmax()
+    profile_max = profile[index_maximum]
+
+    threshold_value = (profile_max - profile_min) * threshold + profile_min
 
     index_start = index_maximum
     index_end = index_maximum
@@ -119,7 +119,7 @@ def get_good_region_profile(profile, threshold=0.3, gfscale=1.8):
             index_start = i
             break
 
-    for i in range(index_maximum, profile.shape[0]):
+    for i in range(index_maximum, profile.size):
         if profile[i] < threshold_value:
             index_end = i
             break
@@ -130,8 +130,8 @@ def get_good_region_profile(profile, threshold=0.3, gfscale=1.8):
     index_start -= gf_extend / 2
     index_end += gf_extend / 2
 
-    index_start = index_start if index_start > 0 else 0
-    index_end = index_end if index_end < profile.size - 1 else profile.size - 1
+    index_start = max(index_start, 0)
+    index_end = min(index_end, profile.size - 1)
 
     return int(index_start), int(index_end)  # Start and end index of the good region
 
