@@ -83,39 +83,25 @@ def get_statistics(image):
 def find_index(axis, item):
     """ Find the index of the axis value that corresponds to the passed value/item"""
 
-    left_bigger_right = axis[0] > axis[1]  # if true axis looks like this [5, 4, 3, 2, 1, 0]
+    ascending = axis[1] > axis[0]  # if true axis looks like this [0, 1, 2, 3, 4, 5]
 
-    # Descending order -> [9, 8, 7, 6]
-    if left_bigger_right:
-        # Item value 10 -> go to first section.
-        if item > axis[0]:
+    # Ascending order -> [6, 7, 8, 9]
+    if ascending:
+        # Item value 5 -> go to first section.
+        if item < axis[0]:
             return 0
 
+        # use 'right' side so that index is always one higher
+        return numpy.searchsorted(axis, item, 'right') - 1
+
+    # Descending order -> [9, 8, 7, 6]
+    else:
         # Item value 5 -> go to last section.
         if item < axis[-1]:
             return len(axis) - 1
 
         # Negate the array and number to search from the right.
         return numpy.searchsorted(-axis, -item)
-
-    # Ascending order -> [6, 7, 8, 9]
-    else:
-        # Item value 5 -> go to first section.
-        if item < axis[0]:
-            return 0
-
-        # Item value 10 -> go to last section.
-        if item > axis[-1]:
-            return len(axis) - 1
-
-        insert_index = numpy.searchsorted(axis, item)
-
-        # If the value is the same as the array value at the given index, use this index directly.
-        if insert_index < len(axis) and axis[insert_index] == item:
-            return insert_index
-
-        # Otherwise return the previous section index.
-        return insert_index - 1
 
 
 def get_good_region_profile(profile, threshold=0.3, gfscale=1.8):
