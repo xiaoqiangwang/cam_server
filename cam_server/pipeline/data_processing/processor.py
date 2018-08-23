@@ -14,12 +14,14 @@ def process_image(image, timestamp, x_axis, y_axis, parameters, image_background
     # Add return values
     return_value = dict()
 
-    if image_background_array is not None:
-        image = functions.subtract_background(image, image_background_array)
+    image_threshold = parameters.get("image_threshold", 0)
 
-    image_threshold = parameters.get("image_threshold")
-    if image_threshold is not None and image_threshold > 0:
+    if image_background_array is not None:
+        functions.remove_background(image, image_background_array, image_threshold)
+    elif image_threshold > 0:
         functions.apply_threshold(image, image_threshold)
+
+    min_value, max_value, x_profile, y_profile, intensity = functions.get_statistics(image)
 
     image_region_of_interest = parameters.get("image_region_of_interest")
     if image_region_of_interest:
@@ -30,18 +32,11 @@ def process_image(image, timestamp, x_axis, y_axis, parameters, image_background
         x_axis = x_axis[offset_x:offset_x + size_x]
         y_axis = y_axis[offset_y:offset_y + size_y]
 
-    (min_value, max_value) = functions.get_min_max(image)
-
-    (x_profile, y_profile) = functions.get_x_y_profile(image)
-
     x_fit = functions.gauss_fit(x_profile, x_axis)
     y_fit = functions.gauss_fit(y_profile, y_axis)
 
-    x_fit_gauss_function, x_fit_offset, x_fit_amplitude, x_fit_mean, x_fit_standard_deviation, x_center_of_mass, x_rms = x_fit
-    y_fit_gauss_function, y_fit_offset, y_fit_amplitude, y_fit_mean, y_fit_standard_deviation, y_center_of_mass, y_rms = y_fit
-
-    # Could be also y_profile.sum() -> it should give the same result.
-    intensity = x_profile.sum()
+    x_fit_gauss_function, x_fit_offset, x_fit_amplitude, x_fit_mean, x_fit_standard_deviation = x_fit
+    y_fit_gauss_function, y_fit_offset, y_fit_amplitude, y_fit_mean, y_fit_standard_deviation = y_fit
 
     # Add return values
     return_value["x_axis"] = x_axis
@@ -57,8 +52,10 @@ def process_image(image, timestamp, x_axis, y_axis, parameters, image_background
     # Needed for config traceability.
     return_value["processing_parameters"] = json.dumps(parameters)
 
-    # TODO Provide - Center of mass of profile
-    # TODO Provide - RMS of profile
+    # Center of mass and RMS of profile
+    x_center_of_mass, x_rms = functions.center_of_mass(x_profile, x_axis)
+    y_center_of_mass, y_rms = functions.center_of_mass(y_profile, y_axis)
+
     return_value["x_center_of_mass"] = x_center_of_mass
     return_value["x_rms"] = x_rms
     return_value["y_center_of_mass"] = y_center_of_mass
@@ -138,7 +135,8 @@ def process_image(image, timestamp, x_axis, y_axis, parameters, image_background
             good_region_y_axis = y_axis[good_region_y_start:good_region_y_end]
 
             # Get profiles of the good region
-            (good_region_x_profile, good_region_y_profile) = functions.get_x_y_profile(good_region)
+            good_region_x_profile = good_region.sum(0)
+            good_region_y_profile = good_region.sum(1)
 
             # Could be also good_region_y_profile.sum() -> it should give the same result.
             good_region_intensity = good_region_x_profile.sum()
@@ -147,8 +145,8 @@ def process_image(image, timestamp, x_axis, y_axis, parameters, image_background
             good_region_x_fit = functions.gauss_fit(good_region_x_profile, good_region_x_axis)
             good_region_y_fit = functions.gauss_fit(good_region_y_profile, good_region_y_axis)
 
-            gr_x_fit_gauss_function, gr_x_fit_offset, gr_x_fit_amplitude, gr_x_fit_mean, gr_x_fit_standard_deviation, _, _ = good_region_x_fit
-            gr_y_fit_gauss_function, gr_y_fit_offset, gr_y_fit_amplitude, gr_y_fit_mean, gr_y_fit_standard_deviation, _, _ = good_region_y_fit
+            gr_x_fit_gauss_function, gr_x_fit_offset, gr_x_fit_amplitude, gr_x_fit_mean, gr_x_fit_standard_deviation = good_region_x_fit
+            gr_y_fit_gauss_function, gr_y_fit_offset, gr_y_fit_amplitude, gr_y_fit_mean, gr_y_fit_standard_deviation = good_region_y_fit
 
             # Add return values
             return_value["good_region"] = [good_region_x_start, good_region_y_start, good_region_x_end,

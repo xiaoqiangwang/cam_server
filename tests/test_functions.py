@@ -17,7 +17,7 @@ class FunctionsTest(unittest.TestCase):
 
         axis += center_set
 
-        gauss_function, offset, amplitude, center, standard_deviation, _, _ = gauss_fit(data, axis)
+        gauss_function, offset, amplitude, center, standard_deviation = gauss_fit(data, axis)
 
         logging.info("Retrieved standard deviation: %f" % standard_deviation)
         logging.info("Retrieved center: %f" % center)

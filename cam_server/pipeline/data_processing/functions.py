@@ -1,10 +1,13 @@
 import tempfile
 from logging import getLogger
 
+import math
+import numba
 import numpy
 import scipy
 import scipy.misc
 import scipy.optimize
+import scipy.stats
 
 from matplotlib import cm
 
@@ -13,17 +16,31 @@ from cam_server import config
 _logging = getLogger(__name__)
 
 
-def subtract_background(image, background_image):
+@numba.njit(parallel=True)
+def remove_background(image, background, threshold):
+    y = image.shape[0]
+    x = image.shape[1]
+    
+    for i in numba.prange(y):
+        for j in range(x):
+            v = image[i,j]
+            b = background[i,j]
+
+            v -= b
+            if v < threshold:
+                v = 0
+
+            image[i,j] = v
+
+
+def subtract_background(image, background_image, threshold):
     # We do not want negative numbers int the image.
     if image.shape != background_image.shape:
         raise RuntimeError("Invalid background_image size %s compared to image %s" % (background_image.shape,
                                                                                       image.shape))
 
-    mask_for_zeros = (background_image > image)
-    numpy.subtract(image, background_image.astype("uint16"), image)
-    image[mask_for_zeros] = 0
-
-    return image
+    numpy.subtract(image, background_image, out=image)
+    image[image < int(threshold)] = 0
 
 
 def get_region_of_interest(image, offset_x, size_x, offset_y, size_y):
@@ -34,18 +51,33 @@ def apply_threshold(image, threshold=1):
     image[image < int(threshold)] = 0
 
 
-def get_min_max(image):
-    return numpy.nanmin(image), numpy.nanmax(image)
+@numba.njit(parallel=True)
+def get_statistics(image):
+    """Return the minimum/maximum, x/y profile"""
+    y = image.shape[0]
+    x = image.shape[1]
 
+    yp = numpy.zeros(y)
+    xp = numpy.zeros(x)
 
-def get_x_y_profile(image):
-    x_profile = image.sum(0)
-    y_profile = image.sum(1)
-    return x_profile, y_profile
+    min = 0
+    max = 0
+    total = 0
 
+    for i in numba.prange(y):
+        for j in range(x):
+            v = image[i, j]
 
-def get_intensity(profile):
-    return profile.sum()
+            yp[i] += v
+            xp[j] += v
+            total += v
+
+            if v < min:
+                min = v
+            elif v > max:
+                max = v
+ 
+    return min, max, xp, yp, total
 
 
 def find_index(axis, item):
@@ -118,49 +150,40 @@ def get_good_region_profile(profile, threshold=0.3, gfscale=1.8):
     return int(index_start), int(index_end)  # Start and end index of the good region
 
 
+def center_of_mass(profile, axis):
+    sum = profile.sum()
+    center_of_mass = numpy.dot(axis, profile) / sum
+    rms = numpy.sqrt(numpy.abs(numpy.dot(axis**2, profile) / sum - center_of_mass ** 2))
+    return center_of_mass, rms
+
+
 def gauss_fit(profile, axis):
     if axis.shape[0] != profile.shape[0]:
         raise RuntimeError("Invalid axis passed %d %d" % (axis.shape[0], profile.shape[0]))
 
-    center_of_mass = (axis * profile).sum() / profile.sum()
-    center_of_mass_2 = (axis * axis * profile).sum() / profile.sum()
-    rms = numpy.sqrt(numpy.abs(center_of_mass_2 - center_of_mass * center_of_mass))
-
-    offset, amplitude, center, standard_deviation = _gauss_fit(axis, profile)
-    gauss_function = _gauss_function(axis, offset, amplitude, center, standard_deviation)
-
-    return gauss_function, offset, amplitude, center, abs(standard_deviation), center_of_mass, rms
-
-
-def _gauss_function(x, offset, amplitude, center, standard_deviation):
-    # return offset + amplitude * numpy.exp(-(numpy.power((x - center), 2) / (2 * numpy.power(standard_deviation, 2))))
-    return offset + amplitude * numpy.exp(-(x - center) ** 2 / (2 * standard_deviation ** 2))
-
-
-def _gauss_fit(axis, profile, center_of_mass=None):
-
     offset = profile.min()  # Minimum is good estimation of offset
     amplitude = profile.max() - offset  # Max value is a good estimation of amplitude
-
-    if center_of_mass:
-        center = center_of_mass  # Center of mass is a good estimation of center (mu)
-    else:
-        center = axis[profile.argmax()]
-
-    surface = numpy.trapz((profile - offset), x=axis)
-    # standard_deviation = surface / ((amplitude - offset) * numpy.sqrt(2 * numpy.pi))
+    center = numpy.dot(axis, profile) / profile.sum() # Center of mass is a good estimation of center (mu)
+    surface = numpy.trapz((profile - offset), x=axis) # Consider gaussian integral is amplitude * sigma * sqrt(2*pi)
     standard_deviation = surface / (amplitude * numpy.sqrt(2 * numpy.pi))
 
     try:
         # It shows up that fastest fitting is when sampling period is around sigma value
         optimal_parameter, _ = scipy.optimize.curve_fit(_gauss_function, axis, profile.astype("float32"),
                                                         p0=[offset, amplitude, center, standard_deviation])
+        offset, amplitude, center, standard_deviation = optimal_parameter
     except BaseException as e:
-        # print(e)
-        # logging.info("COULD NOT CONVERGE!")
+        _logging.exception("COULD NOT CONVERGE!")
         optimal_parameter = [offset, amplitude, center, standard_deviation]
 
-    return optimal_parameter
+    gauss_function = _gauss_function(axis, offset, amplitude, center, standard_deviation)
+
+    return gauss_function, offset, amplitude, center, abs(standard_deviation)
+
+
+@numba.vectorize([numba.float64(numba.float64,numba.float64,numba.float64,numba.float64,numba.float64)])
+def _gauss_function(x, offset, amplitude, center, standard_deviation):
+    return offset + amplitude *  math.exp(-(x - center) ** 2 / (2 * standard_deviation ** 2))
 
 
 def slice_image(image, number_of_slices=1, vertical=False):
@@ -260,7 +283,7 @@ def get_x_slices_data(image, x_axis, y_axis, x_center, x_standard_deviation, sca
             # Does x need to be the middle of slice? - currently it is
             center_x = x_axis[list_slices[i] + n_pixel_half_slice]
 
-            gauss_function, offset, amplitude, center_y, standard_deviation, _, _ = gauss_fit(slice_y_profile, y_axis)
+            gauss_function, offset, amplitude, center_y, standard_deviation = gauss_fit(slice_y_profile, y_axis)
             slice_data.append(([center_x, center_y], standard_deviation, pixel_intensity))
         else:
             _logging.info('Drop slice')
@@ -287,7 +310,7 @@ def get_y_slices_data(image, x_axis, y_axis, y_center, y_standard_deviation, sca
             slice_x_profile = slice_n.sum(0)
             pixel_intensity = slice_n.sum()
 
-            gauss_function, offset, amplitude, center_x, standard_deviation, _, _ = gauss_fit(slice_x_profile, x_axis)
+            gauss_function, offset, amplitude, center_x, standard_deviation = gauss_fit(slice_x_profile, x_axis)
 
             # Does x need to be the middle of slice? - currently it is
             slice_data.append(([center_x, y_axis[list_slices[i] + n_pixel_half_slice]], standard_deviation,
@@ -298,17 +321,9 @@ def get_y_slices_data(image, x_axis, y_axis, y_center, y_standard_deviation, sca
     return slice_data, slice_length
 
 
-def _linear_function(x, slope, offset):
-    return slope * x + offset
-
-
-def linear_fit(x, y):  # x/y arrays
-    # offset = 0.0
-    # slope = 0.1
-    # optimal_parameter, covariance = scipy.optimize.curve_fit(_linear_function, x, y, p0=[slope, offset])
-    optimal_parameter, covariance = scipy.optimize.curve_fit(_linear_function, x, y)  # No initial guesses
-
-    return optimal_parameter  # returns [slope, offset]
+def linear_fit(x, y):
+    slope, intercept, _, _, _ = scipy.stats.linregress(x, y)
+    return slope, intercept
 
 
 def _quadratic_function(x, a, b, c):

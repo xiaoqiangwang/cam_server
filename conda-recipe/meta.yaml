@@ -22,6 +22,7 @@ requirements:
         - pyepics
         - matplotlib
         - pillow
+        - numba
 
 build:
   entry_points:
