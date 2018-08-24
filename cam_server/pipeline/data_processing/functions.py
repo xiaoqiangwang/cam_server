@@ -143,6 +143,11 @@ def center_of_mass(profile, axis):
     return center_of_mass, rms
 
 
+@numba.vectorize([numba.float64(numba.float64,numba.float64,numba.float64,numba.float64,numba.float64)], nopython=True)
+def _gauss_function(x, offset, amplitude, center, standard_deviation):
+    return offset + amplitude * math.exp(-(x - center) ** 2 / (2 * standard_deviation ** 2))
+
+
 def gauss_fit(profile, axis):
     if axis.shape[0] != profile.shape[0]:
         raise RuntimeError("Invalid axis passed %d %d" % (axis.shape[0], profile.shape[0]))
@@ -154,22 +159,31 @@ def gauss_fit(profile, axis):
     standard_deviation = surface / (amplitude * numpy.sqrt(2 * numpy.pi))
 
     try:
-        # It shows up that fastest fitting is when sampling period is around sigma value
-        optimal_parameter, _ = scipy.optimize.curve_fit(_gauss_function, axis, profile.astype("float32"),
-                                                        p0=[offset, amplitude, center, standard_deviation])
+        optimal_parameter, _ = scipy.optimize.curve_fit(
+                _gauss_function, axis, profile.astype("float32"),
+                p0=[offset, amplitude, center, standard_deviation],
+                jac=_gauss_deriv,
+                col_deriv=1)
         offset, amplitude, center, standard_deviation = optimal_parameter
     except BaseException as e:
         _logging.exception("COULD NOT CONVERGE!")
-        optimal_parameter = [offset, amplitude, center, standard_deviation]
 
     gauss_function = _gauss_function(axis, offset, amplitude, center, standard_deviation)
 
     return gauss_function, offset, amplitude, center, abs(standard_deviation)
 
 
-@numba.vectorize([numba.float64(numba.float64,numba.float64,numba.float64,numba.float64,numba.float64)])
-def _gauss_function(x, offset, amplitude, center, standard_deviation):
-    return offset + amplitude *  math.exp(-(x - center) ** 2 / (2 * standard_deviation ** 2))
+@numba.njit
+def _gauss_deriv(x, offset, amplitude, center, standard_deviation):
+    fac = numpy.exp(-(x - center) ** 2 / (2 * standard_deviation ** 2))
+
+    result = numpy.empty((4, x.size), dtype=x.dtype)
+    result[0, :] = 1.0
+    result[1, :] = fac
+    result[2, :] = amplitude * fac * (x - center) / (standard_deviation**2)
+    result[3, :] = amplitude * fac * ((x-center)**2) / (standard_deviation**3)
+
+    return result
 
 
 def slice_image(image, number_of_slices=1, vertical=False):
