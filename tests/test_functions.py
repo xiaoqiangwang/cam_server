@@ -2,11 +2,20 @@ import logging
 import unittest
 import numpy
 from scipy import signal
-logging.getLogger().setLevel(logging.INFO)
-from cam_server.pipeline.data_processing.functions import gauss_fit, calculate_slices, linear_fit, find_index
+from cam_server.pipeline.data_processing.functions import get_statistics, gauss_fit, calculate_slices, linear_fit, find_index
 
 
 class FunctionsTest(unittest.TestCase):
+    def test_get_statistics(self):
+        data = numpy.random.randint(3, 560, (2048,2048))
+        minimum, maximum, x_profile, y_profile, total = get_statistics(data)
+
+        self.assertAlmostEqual(minimum, data.min())
+        self.assertAlmostEqual(maximum, data.max())
+        self.assertAlmostEqual(total, data.sum())
+        self.assertTrue(numpy.allclose(x_profile, data.sum(0)))
+        self.assertTrue(numpy.allclose(y_profile, data.sum(1)))
+
     def test_gauss_fit(self):
         size = 101
         standart_deviation_set = 6.3
