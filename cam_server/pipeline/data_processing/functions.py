@@ -53,31 +53,29 @@ def apply_threshold(image, threshold=1):
 
 @numba.njit(parallel=True)
 def get_statistics(image):
-    """Return the minimum/maximum, x/y profile"""
+    """Return the minimum/maximum, x/y profile, total"""
     y = image.shape[0]
     x = image.shape[1]
 
-    yp = numpy.zeros(y)
-    xp = numpy.zeros(x)
+    yp = numpy.empty(y)
+    xp = image.sum(0)
 
-    min = 0
-    max = 0
+    minimum = image[0,0]
+    maximum = image[0,0]
     total = 0
 
     for i in numba.prange(y):
+        sumx = 0
         for j in range(x):
-            v = image[i, j]
+            v = image[i,j]
 
-            yp[i] += v
-            xp[j] += v
-            total += v
+            sumx += v
+            minimum = min(v, minimum)
+            maximum = max(v, maximum)
+        yp[i] = sumx
+        total += yp[i]
 
-            if v < min:
-                min = v
-            elif v > max:
-                max = v
- 
-    return min, max, xp, yp, total
+    return minimum, maximum, xp, yp, total
 
 
 def find_index(axis, item):
