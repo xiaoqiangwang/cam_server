@@ -57,8 +57,8 @@ def get_statistics(image):
     y = image.shape[0]
     x = image.shape[1]
 
-    yp = numpy.empty(y)
     xp = image.sum(0)
+    yp = numpy.empty(y, dtype=xp.dtype)
 
     minimum = image[0,0]
     maximum = image[0,0]
