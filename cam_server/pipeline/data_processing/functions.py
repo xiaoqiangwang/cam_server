@@ -146,25 +146,26 @@ def _gauss_function(x, offset, amplitude, center, standard_deviation):
     return offset + amplitude * math.exp(-(x - center) ** 2 / (2 * standard_deviation ** 2))
 
 
-def gauss_fit(profile, axis):
+def gauss_fit(profile, axis, **kwargs):
     if axis.shape[0] != profile.shape[0]:
         raise RuntimeError("Invalid axis passed %d %d" % (axis.shape[0], profile.shape[0]))
 
-    offset = profile.min()  # Minimum is good estimation of offset
-    amplitude = profile.max() - offset  # Max value is a good estimation of amplitude
-    center = numpy.dot(axis, profile) / profile.sum() # Center of mass is a good estimation of center (mu)
-    surface = numpy.trapz((profile - offset), x=axis) # Consider gaussian integral is amplitude * sigma * sqrt(2*pi)
-    standard_deviation = surface / (amplitude * numpy.sqrt(2 * numpy.pi))
-
+    offset = kwargs.get('offset', profile.min())  # Minimum is good estimation of offset
+    amplitude = kwargs.get('amplitude', profile.max() - offset)  # Max value is a good estimation of amplitude
+    center = kwargs.get('center', numpy.dot(axis, profile) / profile.sum()) # Center of mass is a good estimation of center (mu)
+    # Consider gaussian integral is amplitude * sigma * sqrt(2*pi)
+    standard_deviation = kwargs.get('standard_deviation', numpy.trapz((profile - offset), x=axis) / (amplitude * numpy.sqrt(2 * numpy.pi)))
+    maxfev = kwargs.get('maxfev', 100) # the default is 100 * (N + 1), which is over killing
     try:
         optimal_parameter, _ = scipy.optimize.curve_fit(
                 _gauss_function, axis, profile.astype("float32"),
                 p0=[offset, amplitude, center, standard_deviation],
                 jac=_gauss_deriv,
-                col_deriv=1)
+                col_deriv=1,
+                maxfev=maxfev)
         offset, amplitude, center, standard_deviation = optimal_parameter
     except BaseException as e:
-        _logging.exception("COULD NOT CONVERGE!")
+        pass
 
     gauss_function = _gauss_function(axis, offset, amplitude, center, standard_deviation)
 
@@ -270,6 +271,7 @@ def get_x_slices_data(image, x_axis, y_axis, x_center, x_standard_deviation, sca
 
     slice_data = []
 
+    last_params = {}
     for i in range(len(list_slices) - 1):
         if list_slices[i] < image.shape[-1] and list_slices[i + 1] < image.shape[-1]:
             # slices are within good region
@@ -281,7 +283,13 @@ def get_x_slices_data(image, x_axis, y_axis, x_center, x_standard_deviation, sca
             # Does x need to be the middle of slice? - currently it is
             center_x = x_axis[list_slices[i] + n_pixel_half_slice]
 
-            gauss_function, offset, amplitude, center_y, standard_deviation = gauss_fit(slice_y_profile, y_axis)
+            gauss_function, offset, amplitude, center_y, standard_deviation = gauss_fit(slice_y_profile, y_axis, **last_params)
+            last_params = {
+                'offset' : offset,
+                'amplitude': amplitude,
+                'center': center_y,
+                'standard_deviation': standard_deviation
+            }
             slice_data.append(([center_x, center_y], standard_deviation, pixel_intensity))
         else:
             _logging.info('Drop slice')
